@@ -819,6 +819,19 @@ pub mod pybind {
                 .fuzz_loop(stages_tuple, py_executor, py_state.unwrap_mut(), py_mgr)
                 .expect("Failed to generate the initial corpus");
         }
+
+        fn fuzz_one(
+            &mut self,
+            py_executor: &mut PythonExecutor,
+            py_state: &mut PythonStdStateWrapper,
+            py_mgr: &mut PythonEventManager,
+            stages_tuple: &mut PythonStagesTuple,
+        ) {
+            self.inner
+                .as_mut()
+                .fuzz_one(stages_tuple, py_executor, py_state.unwrap_mut(), py_mgr)
+                .expect("Failed to generate the initial corpus");
+        }
     }
 
     /// Register the classes to the python module
