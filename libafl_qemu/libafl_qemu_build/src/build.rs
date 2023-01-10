@@ -6,9 +6,9 @@ use std::{
 
 use which::which;
 
-const QEMU_URL: &str = "https://github.com/AFLplusplus/qemu-libafl-bridge";
+const QEMU_URL: &str = "https://github.com/AndrewFasano/qemu";
 const QEMU_DIRNAME: &str = "qemu-libafl-bridge";
-const QEMU_REVISION: &str = "e5424c34d223c2b638af6e4c9eef039db8b69dd4";
+const QEMU_REVISION: &str = "c9c20079842dda0c3004e98d4cee7d2b9f75e0aa";
 
 fn build_dep_check(tools: &[&str]) {
     for tool in tools {
