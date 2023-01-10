@@ -159,6 +159,7 @@ pub fn build(
                 } else {
                     "--disable-slirp"
                 })
+                .arg("--enable-plugin")
                 .arg("--enable-fdt=internal")
                 .arg("--audio-drv-list=")
                 .arg("--disable-alsa")
