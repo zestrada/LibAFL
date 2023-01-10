@@ -6,9 +6,11 @@ use std::{
 
 use which::which;
 
-const QEMU_URL: &str = "https://github.com/AFLplusplus/qemu-libafl-bridge";
+//const QEMU_URL: &str = "https://github.com/AFLplusplus/qemu-libafl-bridge";
+const QEMU_URL: &str = "https://github.com/AndrewFasano/qemu";
 const QEMU_DIRNAME: &str = "qemu-libafl-bridge";
-const QEMU_REVISION: &str = "f6a2e732e8e225ebb8d1a9399561af7330af31b3";
+//const QEMU_REVISION: &str = "e5424c34d223c2b638af6e4c9eef039db8b69dd4";
+const QEMU_REVISION: &str = "9341318197bd51a74d3b2db0e6aede5eb13b5b94";
 
 fn build_dep_check(tools: &[&str]) {
     for tool in tools {
@@ -154,6 +156,7 @@ pub fn build(
                 } else {
                     "--disable-slirp"
                 })
+                .arg("--enable-plugins")
                 .arg("--enable-fdt=internal")
                 .arg("--audio-drv-list=")
                 .arg("--disable-alsa")

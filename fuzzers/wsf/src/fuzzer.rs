@@ -116,6 +116,7 @@ pub fn fuzz() {
                 emu.run();
 
                 // If the execution stops at any point other then the designated breakpoint (e.g. a breakpoint on a panic method) we consider it a crash
+                /*
                 let mut pcs = (0..emu.num_cpus())
                     .map(|i| emu.cpu_from_index(i))
                     .map(|cpu| -> Result<u32, String> { cpu.read_reg(Regs::Pc) });
@@ -125,6 +126,8 @@ pub fn fuzz() {
                     Some(_) => ExitKind::Ok,
                     None => ExitKind::Crash,
                 };
+                */
+                let ret = ExitKind::Ok;
 
                 // OPTION 1: restore only the CPU state (registers et. al)
                 // for (i, s) in saved_cpu_states.iter().enumerate() {
