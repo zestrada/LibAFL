@@ -9,8 +9,8 @@ use which::which;
 //const QEMU_URL: &str = "https://github.com/AFLplusplus/qemu-libafl-bridge";
 const QEMU_URL: &str = "https://github.com/AndrewFasano/qemu";
 const QEMU_DIRNAME: &str = "qemu-libafl-bridge";
-//const QEMU_REVISION: &str = "e5424c34d223c2b638af6e4c9eef039db8b69dd4";
-const QEMU_REVISION: &str = "9341318197bd51a74d3b2db0e6aede5eb13b5b94";
+//const QEMU_REVISION: &str = "9341318197bd51a74d3b2db0e6aede5eb13b5b94";
+const QEMU_REVISION: &str = "2dc25f480a20b649a2369c40366cb79acfb2b9ac";
 
 fn build_dep_check(tools: &[&str]) {
     for tool in tools {

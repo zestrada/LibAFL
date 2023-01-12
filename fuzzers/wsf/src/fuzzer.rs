@@ -1,5 +1,3 @@
-//! A fuzzer using qemu in systemmode for binary-only coverage of kernels
-//!
 use core::{ptr::addr_of_mut, time::Duration};
 use std::{env, path::PathBuf, process};
 
@@ -9,7 +7,7 @@ use libafl::{
         current_nanos,
         launcher::Launcher,
         rands::StdRand,
-        shmem::{ShMemProvider, StdShMemProvider},
+        shmem::{ShMemProvider, StdShMemProvider,ShMem},
         tuples::{tuple_list,Merge},
         AsSlice,
     },
@@ -19,7 +17,7 @@ use libafl::{
     feedback_or, feedback_or_fast,
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
-    inputs::{BytesInput, HasTargetBytes},
+    inputs::{BytesInput, HasBytesVec},
     monitors::MultiMonitor,
     mutators::scheduled::{havoc_mutations, StdScheduledMutator, tokens_mutations},
     mutators::token_mutations::{Tokens},
@@ -31,9 +29,7 @@ use libafl::{
 };
 use libafl_qemu::{
     edges::{edges_map_mut_slice, QemuEdgeCoverageHelper, MAX_EDGES_NUM},
-    elf::EasyElf,
-    emu::Emulator,
-    GuestPhysAddr, QemuExecutor, QemuHooks, Regs,
+    emu::Emulator, QemuExecutor, QemuHooks, 
 };
 
 pub static mut MAX_INPUT_SIZE: usize = 50;
@@ -49,34 +45,8 @@ pub fn fuzz() {
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
     let tokens_file =  PathBuf::from("./tokens/test.dict");
+    let start_snap_name = "snap_0";
 
-    let mut elf_buffer = Vec::new();
-    let elf = EasyElf::from_file(
-        env::var("KERNEL").expect("KERNEL env not set"),
-        &mut elf_buffer,
-    )
-    .unwrap();
-
-    let input_addr = elf
-        .resolve_symbol(
-            &env::var("FUZZ_INPUT").unwrap_or_else(|_| "FUZZ_INPUT".to_owned()),
-            0,
-        )
-        .expect("Symbol or env FUZZ_INPUT not found") as GuestPhysAddr;
-    println!("FUZZ_INPUT @ {:#x}", input_addr);
-
-    let main_addr = elf
-        .resolve_symbol("main", 0)
-        .expect("Symbol main not found");
-    println!("main address = {:#x}", main_addr);
-
-    let breakpoint = elf
-        .resolve_symbol(
-            &env::var("BREAKPOINT").unwrap_or_else(|_| "BREAKPOINT".to_owned()),
-            0,
-        )
-        .expect("Symbol or env BREAKPOINT not found");
-    println!("Breakpoint address = {:#x}", breakpoint);
 
     let mut run_client = |state: Option<_>, mut mgr, _core_id| {
         // Initialize QEMU
@@ -84,64 +54,43 @@ pub fn fuzz() {
         let env: Vec<(String, String)> = env::vars().collect();
         let emu = Emulator::new(&args, &env);
 
-        emu.set_breakpoint(main_addr);
-        unsafe {
-            emu.run();
-        }
-        emu.remove_breakpoint(main_addr);
+        emu.load_snapshot(start_snap_name, true);
 
-        emu.set_breakpoint(breakpoint); // BREAKPOINT
-
-        // let saved_cpu_states: Vec<_> = (0..emu.num_cpus())
-        //     .map(|i| emu.cpu_from_index(i).save_state())
-        //     .collect();
-
-        // emu.save_snapshot("start", true);
-
-        let snap = emu.create_fast_snapshot(true);
-
-        // The wrapped harness function, calling out to the LLVM-style harness
+        // The harness closure
         let mut harness = |input: &BytesInput| {
-            let target = input.target_bytes();
-            let mut buf = target.as_slice();
+            let mut buf = input.bytes().as_slice();
             let len = buf.len();
+
+            let mut provider = StdShMemProvider::new().unwrap();
+            let mut shmem = provider.new_shmem(len).unwrap();
+            let env_var = "WSF_input_shmid"; 
+            shmem.write_to_env(env_var).unwrap();
+            //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
+            //Now write some data, gotta convert to u8 slice
+
             unsafe {
                 if len > MAX_INPUT_SIZE {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     // len = MAX_INPUT_SIZE;
                 }
-
-                emu.write_phys_mem(input_addr, buf);
+                let shm_input = shmem.as_object_mut::<&mut[u8]>();
+                /*
+                for (dst, src) in shm_input.iter_mut().zip(&buf) {
+                        *dst = *src
+                }
+                */
+                shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
                 emu.run();
 
-                // If the execution stops at any point other then the designated breakpoint (e.g. a breakpoint on a panic method) we consider it a crash
-                /*
-                let mut pcs = (0..emu.num_cpus())
-                    .map(|i| emu.cpu_from_index(i))
-                    .map(|cpu| -> Result<u32, String> { cpu.read_reg(Regs::Pc) });
-                let ret = match pcs
-                    .find(|pc| (breakpoint..breakpoint + 5).contains(pc.as_ref().unwrap_or(&0)))
-                {
-                    Some(_) => ExitKind::Ok,
-                    None => ExitKind::Crash,
-                };
-                */
-                let ret = ExitKind::Ok;
+                //Once control is back to fuzzer, can release shmem from guest
 
-                // OPTION 1: restore only the CPU state (registers et. al)
-                // for (i, s) in saved_cpu_states.iter().enumerate() {
-                //     emu.cpu_from_index(i).restore_state(s);
-                // }
-
-                // OPTION 2: restore a slow vanilla QEMU snapshot
-                // emu.load_snapshot("start", true);
-
-                // OPTION 3: restore a fast devices+mem snapshot
-                emu.restore_fast_snapshot(snap);
-
-                ret
             }
+            let ret = ExitKind::Ok;
+
+            provider.release_shmem(&mut shmem);
+
+            ret
         };
 
         // Create an observation channel using the coverage map
@@ -226,9 +175,9 @@ pub fn fuzz() {
         if state.metadata().get::<Tokens>().is_none() {
             state.add_metadata(Tokens::from_file(tokens_file.clone())?);
         }
-
+        
         fuzzer
-            .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
+            .fuzz_one(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
         Ok(())
     };
