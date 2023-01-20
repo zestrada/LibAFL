@@ -1,4 +1,4 @@
-use core::{ptr::addr_of_mut, time::Duration};
+use core::{time::Duration};
 use std::{env, path::PathBuf, process};
 
 use libafl::{
@@ -12,27 +12,28 @@ use libafl::{
         AsSlice,
     },
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::EventConfig,
+    events::SimpleEventManager,
     executors::{ExitKind, TimeoutExecutor},
     feedback_or, feedback_or_fast,
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasBytesVec},
-    monitors::MultiMonitor,
+    monitors::SimpleMonitor,
     mutators::scheduled::{havoc_mutations, StdScheduledMutator, tokens_mutations},
     mutators::token_mutations::{Tokens},
-    observers::{HitcountsMapObserver, TimeObserver, VariableMapObserver},
+    observers::{HitcountsMapObserver, TimeObserver, ConstMapObserver},
     schedulers::{IndexesLenTimeMinimizerScheduler, QueueScheduler},
     stages::StdMutationalStage,
     state::{HasCorpus, StdState, HasMetadata},
     Error,
 };
 use libafl_qemu::{
-    edges::{edges_map_mut_slice, QemuEdgeCoverageHelper, MAX_EDGES_NUM},
+    edges::{QemuEdgeCoverageHelper },
     emu::Emulator, QemuExecutor, QemuHooks, 
 };
 
 pub static mut MAX_INPUT_SIZE: usize = 50;
+pub const MAP_SIZE: usize = 0xffffff;
 
 pub fn fuzz() {
     if let Ok(s) = env::var("FUZZ_SIZE") {
@@ -40,15 +41,12 @@ pub fn fuzz() {
     };
     // Hardcoded parameters
     let timeout = Duration::from_secs(3);
-    let broker_port = 1337;
-    let cores = Cores::from_cmdline("1").unwrap();
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
     let tokens_file =  PathBuf::from("./tokens/test.dict");
     let start_snap_name = "snap_0";
 
-
-    let mut run_client = |state: Option<_>, mut mgr, _core_id| {
+    let run_client = |state: Option<_>, mut mgr, _core_id| {
         // Initialize QEMU
         let args: Vec<String> = env::args().collect();
         let env: Vec<(String, String)> = env::vars().collect();
@@ -92,13 +90,18 @@ pub fn fuzz() {
 
             ret
         };
+        // The shared memory allocator
+        let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
+
+
+        let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
+        cov_shmem.write_to_env("WSF_coverage_shmid").unwrap();
 
         // Create an observation channel using the coverage map
         let edges_observer = unsafe {
-            HitcountsMapObserver::new(VariableMapObserver::from_mut_slice(
+            HitcountsMapObserver::new(ConstMapObserver::<_, MAP_SIZE>::new(
                 "edges",
-                edges_map_mut_slice(),
-                addr_of_mut!(MAX_EDGES_NUM),
+                cov_shmem.as_object_mut::<&mut[u8]>() 
             ))
         };
 
@@ -173,24 +176,27 @@ pub fn fuzz() {
         let mut stages = tuple_list!(StdMutationalStage::new(mutator));
 
         if state.metadata().get::<Tokens>().is_none() {
-            state.add_metadata(Tokens::from_file(tokens_file.clone())?);
+            state.add_metadata(Tokens::from_file(tokens_file.clone()).unwrap());
         }
         
         fuzzer
             .fuzz_one(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
-        Ok(())
+        //Ok(())
     };
 
+
+    let monitor = SimpleMonitor::new(|s| println!("{s}"));
+    let mgr = SimpleEventManager::new(monitor);
+    run_client(None, mgr, 0);
+
+    /*
+    // TODO: should we be doing this builder stuff?
+    // The stats reporter for the broker
+    //let monitor = MultiMonitor::new(|s| println!("{s}"));
     // The shared memory allocator
     let shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
 
-    // The stats reporter for the broker
-    let monitor = MultiMonitor::new(|s| println!("{s}"));
-
-    // let monitor = SimpleMonitor::new(|s| println!("{s}"));
-    // let mut mgr = SimpleEventManager::new(monitor);
-    // run_client(None, mgr, 0);
 
     // Build and run a Launcher
     match Launcher::builder()
@@ -208,4 +214,5 @@ pub fn fuzz() {
         Err(Error::ShuttingDown) => println!("Fuzzing stopped by user. Good bye."),
         Err(err) => panic!("Failed to run launcher: {:?}", err),
     }
+    */
 }
