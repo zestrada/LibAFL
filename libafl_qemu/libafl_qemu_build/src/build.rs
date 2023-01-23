@@ -10,7 +10,7 @@ use which::which;
 const QEMU_URL: &str = "https://github.com/AndrewFasano/qemu";
 const QEMU_DIRNAME: &str = "qemu-libafl-bridge";
 //const QEMU_REVISION: &str = "9341318197bd51a74d3b2db0e6aede5eb13b5b94";
-const QEMU_REVISION: &str = "db70cea31983736bff4c141a1456e0420e7c61d4";
+const QEMU_REVISION: &str = "b6d8b7c01a2a0ea3adef963cffa44e61343d2386";
 
 fn build_dep_check(tools: &[&str]) {
     for tool in tools {
@@ -278,12 +278,27 @@ pub fn build(
                 .arg(&format!("{j}"))
                 .status()
                 .expect("Make failed");
+
+            Command::new("make")
+                .current_dir(&build_dir)
+                .arg("plugins")
+                .arg("-j")
+                .arg(&format!("{j}"))
+                .status()
+                .expect("Make plugins failed");
         } else {
             Command::new("make")
                 .current_dir(&build_dir)
                 .arg("-j")
                 .status()
                 .expect("Make failed");
+
+            Command::new("make")
+                .current_dir(&build_dir)
+                .arg("plugins")
+                .arg("-j")
+                .status()
+                .expect("Make plugins failed");
         }
     }
 
