@@ -10,6 +10,7 @@ use libafl::{
         shmem::{ShMemProvider, StdShMemProvider,ShMem},
         tuples::{tuple_list,Merge},
         AsSlice,
+        AsMutSlice
     },
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
     events::SimpleEventManager,
@@ -71,7 +72,7 @@ pub fn fuzz() {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     // len = MAX_INPUT_SIZE;
                 }
-                let shm_input = shmem.as_object_mut::<&mut[u8]>();
+                let shm_input = shmem.as_mut_slice();
                 /*
                 for (dst, src) in shm_input.iter_mut().zip(&buf) {
                         *dst = *src
@@ -98,12 +99,10 @@ pub fn fuzz() {
         cov_shmem.write_to_env("WSF_coverage_shmid").unwrap();
 
         // Create an observation channel using the coverage map
-        let edges_observer = unsafe {
+        let edges_observer =
             HitcountsMapObserver::new(ConstMapObserver::<_, MAP_SIZE>::new(
-                "edges",
-                cov_shmem.as_object_mut::<&mut[u8]>() 
-            ))
-        };
+                "edges", cov_shmem.as_mut_slice()
+            ));
 
         // Create an observation channel to keep track of the execution time
         let time_observer = TimeObserver::new("time");
