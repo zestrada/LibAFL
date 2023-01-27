@@ -33,7 +33,7 @@ use libafl_qemu::{
     emu::Emulator, QemuExecutor, QemuHooks, 
 };
 
-pub static mut MAX_INPUT_SIZE: usize = 50;
+pub static mut MAX_INPUT_SIZE: usize = 512;
 pub const MAP_SIZE: usize = 0xffffff;
 
 pub fn fuzz() {
