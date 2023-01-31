@@ -33,3 +33,5 @@ a
 # ignore files from concolic tests
 symcc_build
 symcc
+
+.git
