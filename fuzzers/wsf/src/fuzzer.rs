@@ -13,13 +13,15 @@ use libafl::{
         AsMutSlice
     },
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
+    events::EventConfig,
     events::SimpleEventManager,
     executors::{ExitKind, TimeoutExecutor},
     feedback_or, feedback_or_fast,
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
     fuzzer::{Fuzzer, StdFuzzer},
     inputs::{BytesInput, HasBytesVec},
-    monitors::SimpleMonitor,
+    //monitors::SimpleMonitor,
+    monitors::MultiMonitor,
     mutators::scheduled::{havoc_mutations, StdScheduledMutator, tokens_mutations},
     mutators::token_mutations::{Tokens},
     observers::{HitcountsMapObserver, TimeObserver, ConstMapObserver},
@@ -29,7 +31,7 @@ use libafl::{
     Error,
 };
 use libafl_qemu::{
-    edges::{QemuEdgeCoverageHelper },
+    //edges::{QemuEdgeCoverageHelper },
     emu::Emulator, QemuExecutor, QemuHooks, 
 };
 
@@ -41,13 +43,15 @@ pub fn fuzz() {
         str::parse::<usize>(&s).expect("FUZZ_SIZE was not a number");
     };
     // Hardcoded parameters
+    let cores = Cores::from_cmdline("1").unwrap();
     let timeout = Duration::from_secs(10);
+    let broker_port = 1337;
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
     let tokens_file =  PathBuf::from("./tokens/test.dict");
     let start_snap_name = "snap_0";
 
-    let run_client = |state: Option<_>, mut mgr, _core_id| {
+    let mut run_client = |state: Option<_>, mut mgr, _core_id| {
         // Initialize QEMU
         let args: Vec<String> = env::args().collect();
         let env: Vec<(String, String)> = env::vars().collect();
@@ -88,6 +92,7 @@ pub fn fuzz() {
             let ret = ExitKind::Ok;
 
             provider.release_shmem(&mut shmem);
+            emu.load_snapshot("snap_0", true); // XXX parameterize this!
 
             ret
         };
@@ -179,20 +184,19 @@ pub fn fuzz() {
         }
         
         fuzzer
-            .fuzz_one(&mut stages, &mut executor, &mut state, &mut mgr)
+            .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
-        //Ok(())
+        Ok(())
     };
 
 
-    let monitor = SimpleMonitor::new(|s| println!("{s}"));
-    let mgr = SimpleEventManager::new(monitor);
-    run_client(None, mgr, 0);
+    //let monitor = SimpleMonitor::new(|s| println!("{s}"));
+    //let mgr = SimpleEventManager::new(monitor);
+    //run_client(None, mgr, 0);
 
-    /*
     // TODO: should we be doing this builder stuff?
     // The stats reporter for the broker
-    //let monitor = MultiMonitor::new(|s| println!("{s}"));
+    let monitor = MultiMonitor::new(|s| println!("{s}"));
     // The shared memory allocator
     let shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
 
@@ -205,7 +209,7 @@ pub fn fuzz() {
         .monitor(monitor)
         .run_client(&mut run_client)
         .cores(&cores)
-        // .stdout_file(Some("/dev/null"))
+        .stdout_file(Some("/tmp/fuzzer.txt"))
         .build()
         .launch()
     {
@@ -213,5 +217,4 @@ pub fn fuzz() {
         Err(Error::ShuttingDown) => println!("Fuzzing stopped by user. Good bye."),
         Err(err) => panic!("Failed to run launcher: {:?}", err),
     }
-    */
 }
