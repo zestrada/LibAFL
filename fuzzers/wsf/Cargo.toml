@@ -15,5 +15,6 @@ lto = "fat"
 codegen-units = 1
 
 [dependencies]
+libc = "*"
 libafl = { path = "../../libafl/" }
 libafl_qemu = { path = "../../libafl_qemu/", features = ["mips", "systemmode", "be"] }

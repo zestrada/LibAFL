@@ -1,5 +1,6 @@
-use core::{time::Duration};
+use core::{time::Duration,ptr};
 use std::{env, path::PathBuf, process};
+use libc::{shmctl};
 
 use libafl::{
     bolts::{
@@ -13,8 +14,8 @@ use libafl::{
         AsMutSlice
     },
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::EventConfig,
-    events::SimpleEventManager,
+    events::EventConfig;
+    //events::SimpleEventManager,
     executors::{ExitKind, TimeoutExecutor},
     feedback_or, feedback_or_fast,
     feedbacks::{CrashFeedback, MaxMapFeedback, TimeFeedback, TimeoutFeedback},
@@ -37,6 +38,8 @@ use libafl_qemu::{
 
 pub static mut MAX_INPUT_SIZE: usize = 512;
 pub const MAP_SIZE: usize = 0xffffff;
+pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
+pub static INPUT_SHMID_ENV: &str = "WSF_input_shmid";
 
 pub fn fuzz() {
     if let Ok(s) = env::var("FUZZ_SIZE") {
@@ -59,6 +62,15 @@ pub fn fuzz() {
 
         emu.load_snapshot(start_snap_name, true);
 
+        let snap = emu.create_fast_snapshot(true);
+
+        // The shared memory allocator
+        let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
+
+
+        let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
+        cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
+    
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
@@ -66,11 +78,28 @@ pub fn fuzz() {
 
             let mut provider = StdShMemProvider::new().unwrap();
             let mut shmem = provider.new_shmem(len).unwrap();
-            let env_var = "WSF_input_shmid"; 
-            shmem.write_to_env(env_var).unwrap();
+            shmem.write_to_env(INPUT_SHMID_ENV).unwrap();
             //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
-            //Now write some data, gotta convert to u8 slice
 
+            //Below should't release shm until nothing is attached. 
+            //*BUT* shmget will not return an id if the segment has been marked 
+            //for deletion. So don't do that.
+            //Certainly not rusty to call shmctl directly, but we had a mem leak
+            //Should really happen on Drop, so we're likely holding on to refs.
+            //https://docs.rs/libafl/latest/src/libafl/bolts/shmem.rs.html#901-910
+            unsafe {
+                //Even though we just mapped the input, leaving this as dealing
+                //with the env var so the code could be easily moved
+                for env_var in [COV_SHMID_ENV, INPUT_SHMID_ENV] {
+                    let mut tmp_map = provider.existing_from_env(env_var).unwrap();
+                    let id: i32 = tmp_map.id().into();
+                    let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
+                    provider.release_shmem(&mut tmp_map);
+                    //println!("shmctl on id {} returned {}", id, shm_ret);
+                }
+            }
+
+            //Now write some data, gotta convert to u8 slice
             unsafe {
                 if len > MAX_INPUT_SIZE {
                     buf = &buf[0..MAX_INPUT_SIZE];
@@ -84,24 +113,20 @@ pub fn fuzz() {
                 */
                 shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
+                //println!("Before emu.run");
                 emu.run();
 
-                //Once control is back to fuzzer, can release shmem from guest
-
+                //println!("Before restore_fast_snap");
+                emu.restore_fast_snapshot(snap);
+                //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
 
             provider.release_shmem(&mut shmem);
-            emu.load_snapshot("snap_0", true); // XXX parameterize this!
+            //emu.load_snapshot("snap_0", true); // XXX parameterize this!
 
             ret
         };
-        // The shared memory allocator
-        let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
-
-
-        let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
-        cov_shmem.write_to_env("WSF_coverage_shmid").unwrap();
 
         // Create an observation channel using the coverage map
         let edges_observer =
@@ -194,7 +219,6 @@ pub fn fuzz() {
     //let mgr = SimpleEventManager::new(monitor);
     //run_client(None, mgr, 0);
 
-    // TODO: should we be doing this builder stuff?
     // The stats reporter for the broker
     let monitor = MultiMonitor::new(|s| println!("{s}"));
     // The shared memory allocator
