@@ -25,11 +25,12 @@ default-members = [
     "libafl_targets",
 ]
 exclude = [
+    "libafl_qemu/libafl_qemu_build",
+    "libafl_qemu/libafl_qemu_sys",
+    "fuzzers/wsf",
     "fuzzers",
     "bindings",
     "scripts",
-    "libafl_qemu/libafl_qemu_build",
-    "libafl_qemu/libafl_qemu_sys"
 ]
 
 [workspace.package]

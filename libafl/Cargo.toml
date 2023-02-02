@@ -119,7 +119,7 @@ windows = "0.42.0"
 #opt-level = 3
 #debug = true
 
-[[example]]
-name = "llmp_test"
-path = "./examples/llmp_test/main.rs"
-required-features = ["std"]
+#[[example]]
+#name = "llmp_test"
+#path = "./examples/llmp_test/main.rs"
+#required-features = ["std"]
