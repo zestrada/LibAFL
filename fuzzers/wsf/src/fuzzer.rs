@@ -14,7 +14,7 @@ use libafl::{
         AsMutSlice
     },
     corpus::{Corpus, InMemoryCorpus, OnDiskCorpus},
-    events::EventConfig;
+    events::EventConfig,
     //events::SimpleEventManager,
     executors::{ExitKind, TimeoutExecutor},
     feedback_or, feedback_or_fast,
