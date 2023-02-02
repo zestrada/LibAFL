@@ -1,4 +1,4 @@
-use core::{time::Duration,ptr};
+use core::{ptr::addr_of_mut,time::Duration,ptr};
 use std::{env, path::PathBuf, process};
 use libc::{shmctl};
 
@@ -25,20 +25,19 @@ use libafl::{
     monitors::MultiMonitor,
     mutators::scheduled::{havoc_mutations, StdScheduledMutator, tokens_mutations},
     mutators::token_mutations::{Tokens},
-    observers::{HitcountsMapObserver, TimeObserver, ConstMapObserver},
+    observers::{HitcountsMapObserver, TimeObserver, VariableMapObserver},
     schedulers::{IndexesLenTimeMinimizerScheduler, QueueScheduler},
     stages::StdMutationalStage,
     state::{HasCorpus, StdState, HasMetadata},
     Error,
 };
 use libafl_qemu::{
-    //edges::{QemuEdgeCoverageHelper },
     emu::Emulator, QemuExecutor, QemuHooks, 
 };
+use libafl_targets::{edges_map_mut_slice, EDGES_MAP, MAX_EDGES_NUM};
 
 pub static mut MAX_INPUT_SIZE: usize = 512;
 pub const MAP_SIZE: usize = 0xffffff;
-pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
 pub static INPUT_SHMID_ENV: &str = "WSF_input_shmid";
 
 pub fn fuzz() {
@@ -69,9 +68,6 @@ pub fn fuzz() {
         // The shared memory allocator
         let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
 
-        let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
-        cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
-    
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
@@ -91,13 +87,11 @@ pub fn fuzz() {
             unsafe {
                 //Even though we just mapped the input, leaving this as dealing
                 //with the env var so the code could be easily moved
-                for env_var in [COV_SHMID_ENV, INPUT_SHMID_ENV] {
-                    let mut tmp_map = provider.existing_from_env(env_var).unwrap();
-                    let id: i32 = tmp_map.id().into();
-                    let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
-                    provider.release_shmem(&mut tmp_map);
-                    //println!("shmctl on id {} returned {}", id, shm_ret);
-                }
+                let mut tmp_map = provider.existing_from_env(INPUT_SHMID_ENV).unwrap();
+                let id: i32 = tmp_map.id().into();
+                let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
+                provider.release_shmem(&mut tmp_map);
+                //println!("shmctl on id {} returned {}", id, shm_ret);
             }
 
             //Now write some data, gotta convert to u8 slice
@@ -133,10 +127,13 @@ pub fn fuzz() {
         };
 
         // Create an observation channel using the coverage map
-        let edges_observer =
-            HitcountsMapObserver::new(ConstMapObserver::<_, MAP_SIZE>::new(
-                "edges", cov_shmem.as_mut_slice()
-            ));
+        let edges_observer = unsafe {
+            HitcountsMapObserver::new(VariableMapObserver::from_mut_slice(
+                "edges",
+                edges_map_mut_slice(),
+                addr_of_mut!(MAX_EDGES_NUM),
+            ))
+        };
 
         // Create an observation channel to keep track of the execution time
         let time_observer = TimeObserver::new("time");
