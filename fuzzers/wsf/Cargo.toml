@@ -18,3 +18,4 @@ codegen-units = 1
 libc = "*"
 libafl = { path = "../../libafl/" }
 libafl_qemu = { path = "../../libafl_qemu/", features = ["mips", "systemmode", "be"] }
+libafl_targets = { path = "../../libafl_targets/" }
