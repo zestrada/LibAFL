@@ -52,7 +52,7 @@ pub fn fuzz() {
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
     let tokens_file =  PathBuf::from("./tokens/test.dict");
-    let start_snap_name = "snap_0";
+    let start_snap_name = env::var("SNAP_NAME").expect("SNAP_NAME not set");
 
     let mut run_client = |state: Option<_>, mut mgr, _core_id| {
         // Initialize QEMU
@@ -60,7 +60,11 @@ pub fn fuzz() {
         let env: Vec<(String, String)> = env::vars().collect();
         let emu = Emulator::new(&args, &env);
 
-        emu.load_snapshot(start_snap_name, true);
+        // Load the specified snapshot from the qcow
+        emu.load_snapshot(&start_snap_name, true);
+
+        // Take a fast snapshot
+        let snap = emu.create_fast_snapshot(true);
 
         let snap = emu.create_fast_snapshot(true);
 
@@ -123,7 +127,10 @@ pub fn fuzz() {
             let ret = ExitKind::Ok;
 
             provider.release_shmem(&mut shmem);
-            //emu.load_snapshot("snap_0", true); // XXX parameterize this!
+
+            // Revert, either to our qcow or our fast snapshot
+            //emu.load_snapshot(&start_snap_name, true);
+            emu.restore_fast_snapshot(snap);
 
             ret
         };
@@ -143,7 +150,7 @@ pub fn fuzz() {
             // New maximization map feedback linked to the edges observer and the feedback state
             MaxMapFeedback::new_tracking(&edges_observer, true, true),
             // Time feedback, this one does not need a feedback state
-            TimeFeedback::new_with_observer(&time_observer)
+            TimeFeedback::with_observer(&time_observer)
         );
 
         // A feedback to choose if an input is a solution or not
