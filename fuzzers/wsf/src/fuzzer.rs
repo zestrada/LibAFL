@@ -63,8 +63,8 @@ pub fn fuzz() {
         // Load the specified snapshot from the qcow
         emu.load_snapshot(&start_snap_name, true);
 
-        // Take a fast snapshot
-        let snap = emu.create_fast_snapshot(true);
+        // Take a fast snapshot - Nah we'll use slow snaps
+        //let snap = emu.create_fast_snapshot(true);
 
         let snap = emu.create_fast_snapshot(true);
 
@@ -129,8 +129,8 @@ pub fn fuzz() {
             provider.release_shmem(&mut shmem);
 
             // Revert, either to our qcow or our fast snapshot
-            //emu.load_snapshot(&start_snap_name, true);
-            emu.restore_fast_snapshot(snap);
+            emu.load_snapshot(&start_snap_name, true);
+            //emu.restore_fast_snapshot(snap);
 
             ret
         };
