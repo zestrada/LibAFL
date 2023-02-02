@@ -66,11 +66,8 @@ pub fn fuzz() {
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
 
-        let snap = emu.create_fast_snapshot(true);
-
         // The shared memory allocator
         let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
-
 
         let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
         cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
@@ -121,7 +118,7 @@ pub fn fuzz() {
                 emu.run();
 
                 //println!("Before restore_fast_snap");
-                emu.restore_fast_snapshot(snap);
+                //emu.restore_fast_snapshot(snap);
                 //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
