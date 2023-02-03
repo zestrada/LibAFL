@@ -8,7 +8,7 @@ use libafl::{
         current_nanos,
         launcher::Launcher,
         rands::StdRand,
-        shmem::{ShMemProvider, StdShMemProvider,ShMem},
+        shmem::{ShMemProvider, StdShMemProvider},
         tuples::{tuple_list,Merge},
         AsSlice,
         AsMutSlice
@@ -36,9 +36,15 @@ use libafl_qemu::{
 };
 use libafl_targets::{edges_map_mut_slice, EDGES_MAP, MAX_EDGES_NUM};
 
-pub static mut MAX_INPUT_SIZE: usize = 512;
-pub const MAP_SIZE: usize = 0xffffff;
-pub static INPUT_SHMID_ENV: &str = "WSF_input_shmid";
+pub const MAX_INPUT_SIZE: usize = 512;
+
+//input symbols
+#[no_mangle]
+pub static mut __afl_input_ptr_local: [u8; MAX_INPUT_SIZE] = [0; MAX_INPUT_SIZE];
+#[no_mangle]
+pub static mut __afl_input_size: usize = 0;
+pub use __afl_input_ptr_local as INPUT;
+pub use __afl_input_size as INPUT_SIZE;
 
 pub fn fuzz() {
     if let Ok(s) = env::var("FUZZ_SIZE") {
@@ -65,34 +71,10 @@ pub fn fuzz() {
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
 
-        // The shared memory allocator
-        let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
-
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
             let len = buf.len();
-
-            let mut provider = StdShMemProvider::new().unwrap();
-            let mut shmem = provider.new_shmem(len).unwrap();
-            shmem.write_to_env(INPUT_SHMID_ENV).unwrap();
-            //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
-
-            //Below should't release shm until nothing is attached. 
-            //*BUT* shmget will not return an id if the segment has been marked 
-            //for deletion. So don't do that.
-            //Certainly not rusty to call shmctl directly, but we had a mem leak
-            //Should really happen on Drop, so we're likely holding on to refs.
-            //https://docs.rs/libafl/latest/src/libafl/bolts/shmem.rs.html#901-910
-            unsafe {
-                //Even though we just mapped the input, leaving this as dealing
-                //with the env var so the code could be easily moved
-                let mut tmp_map = provider.existing_from_env(INPUT_SHMID_ENV).unwrap();
-                let id: i32 = tmp_map.id().into();
-                let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
-                provider.release_shmem(&mut tmp_map);
-                //println!("shmctl on id {} returned {}", id, shm_ret);
-            }
 
             //Now write some data, gotta convert to u8 slice
             unsafe {
@@ -100,13 +82,13 @@ pub fn fuzz() {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     // len = MAX_INPUT_SIZE;
                 }
-                let shm_input = shmem.as_mut_slice();
                 /*
                 for (dst, src) in shm_input.iter_mut().zip(&buf) {
                         *dst = *src
                 }
                 */
-                shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
+                INPUT[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
+                INPUT_SIZE = len;
 
                 //println!("Before emu.run");
                 emu.run();
@@ -116,8 +98,6 @@ pub fn fuzz() {
                 //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
-
-            provider.release_shmem(&mut shmem);
 
             // Revert, either to our qcow or our fast snapshot
             emu.load_snapshot(&start_snap_name, true);
