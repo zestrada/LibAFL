@@ -8,7 +8,7 @@ use libafl::{
         current_nanos,
         launcher::Launcher,
         rands::StdRand,
-        shmem::{ShMemProvider, StdShMemProvider},
+        shmem::{ShMemProvider, StdShMemProvider,ShMem},
         tuples::{tuple_list,Merge},
         AsSlice,
         AsMutSlice
@@ -25,7 +25,7 @@ use libafl::{
     monitors::MultiMonitor,
     mutators::scheduled::{havoc_mutations, StdScheduledMutator, tokens_mutations},
     mutators::token_mutations::{Tokens},
-    observers::{HitcountsMapObserver, TimeObserver, VariableMapObserver},
+    observers::{HitcountsMapObserver, TimeObserver, VariableMapObserver, ConstMapObserver},
     schedulers::{IndexesLenTimeMinimizerScheduler, QueueScheduler},
     stages::StdMutationalStage,
     state::{HasCorpus, StdState, HasMetadata},
@@ -33,10 +33,15 @@ use libafl::{
 };
 use libafl_qemu::{
     emu::Emulator, QemuExecutor, QemuHooks, 
+    //edges::{edges_map_mut_slice, MAX_EDGES_NUM},
 };
-use libafl_targets::{edges_map_mut_slice, EDGES_MAP, MAX_EDGES_NUM};
+//pub static mut MAX_INPUT_SIZE: usize = 512;
+pub const MAP_SIZE: usize = 0xffffff;
+pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
 
 pub const MAX_INPUT_SIZE: usize = 512;
+
+pub static mut MAP_SIZE_MUT: usize = MAP_SIZE;
 
 //input symbols
 #[no_mangle]
@@ -71,10 +76,39 @@ pub fn fuzz() {
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
 
+        // The shared memory allocator
+        let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
+
+        let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
+        cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
+
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
             let len = buf.len();
+
+            let mut provider = StdShMemProvider::new().unwrap();
+            let mut shmem = provider.new_shmem(len).unwrap();
+
+            //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
+
+            //Below should't release shm until nothing is attached.
+            //*BUT* shmget will not return an id if the segment has been marked
+            //for deletion. So don't do that.
+            //Certainly not rusty to call shmctl directly, but we had a mem leak
+            //Should really happen on Drop, so we're likely holding on to refs.
+            //https://docs.rs/libafl/latest/src/libafl/bolts/shmem.rs.html#901-910
+            unsafe {
+                //Even though we just mapped the input, leaving this as dealing
+                //with the env var so the code could be easily moved
+                for env_var in [COV_SHMID_ENV] {
+                    let mut tmp_map = provider.existing_from_env(env_var).unwrap();
+                    let id: i32 = tmp_map.id().into();
+                    let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
+                    provider.release_shmem(&mut tmp_map);
+                    //println!("shmctl on id {} returned {}", id, shm_ret);
+                }
+            }
 
             //Now write some data, gotta convert to u8 slice
             unsafe {
@@ -82,6 +116,8 @@ pub fn fuzz() {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     // len = MAX_INPUT_SIZE;
                 }
+                //let shm_input = shmem.as_mut_slice();
+
                 /*
                 for (dst, src) in shm_input.iter_mut().zip(&buf) {
                         *dst = *src
@@ -89,6 +125,7 @@ pub fn fuzz() {
                 */
                 INPUT[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
                 INPUT_SIZE = len;
+                //shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
                 //println!("Before emu.run");
                 emu.run();
@@ -98,6 +135,8 @@ pub fn fuzz() {
                 //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
+            provider.release_shmem(&mut shmem);
+
 
             // Revert, either to our qcow or our fast snapshot
             emu.load_snapshot(&start_snap_name, true);
@@ -110,8 +149,8 @@ pub fn fuzz() {
         let edges_observer = unsafe {
             HitcountsMapObserver::new(VariableMapObserver::from_mut_slice(
                 "edges",
-                edges_map_mut_slice(),
-                addr_of_mut!(MAX_EDGES_NUM),
+                cov_shmem.as_mut_slice().into(),
+                addr_of_mut!(MAP_SIZE_MUT),
             ))
         };
 
@@ -192,6 +231,7 @@ pub fn fuzz() {
         fuzzer
             .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
+
         Ok(())
     };
 
