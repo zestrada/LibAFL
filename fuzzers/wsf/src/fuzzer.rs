@@ -35,11 +35,10 @@ use libafl_qemu::{
     emu::Emulator, QemuExecutor, QemuHooks, 
     //edges::{edges_map_mut_slice, MAX_EDGES_NUM},
 };
-//pub static mut MAX_INPUT_SIZE: usize = 512;
 pub const MAP_SIZE: usize = 0xffffff;
 pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
 
-pub const MAX_INPUT_SIZE: usize = 512;
+pub const MAX_INPUT_SIZE: usize = 128;
 
 pub static mut MAP_SIZE_MUT: usize = MAP_SIZE;
 
@@ -76,16 +75,16 @@ pub fn fuzz() {
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
 
+
         // The shared memory allocator
         let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
 
         let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
         cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
-
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
-            let len = buf.len();
+            let mut len = buf.len();
 
             let mut provider = StdShMemProvider::new().unwrap();
             let mut shmem = provider.new_shmem(len).unwrap();
@@ -114,7 +113,7 @@ pub fn fuzz() {
             unsafe {
                 if len > MAX_INPUT_SIZE {
                     buf = &buf[0..MAX_INPUT_SIZE];
-                    // len = MAX_INPUT_SIZE;
+                    len = MAX_INPUT_SIZE;
                 }
                 //let shm_input = shmem.as_mut_slice();
 
