@@ -35,6 +35,8 @@ use libafl_qemu::{
     emu::Emulator, QemuExecutor, QemuHooks, 
     //edges::{edges_map_mut_slice, MAX_EDGES_NUM},
 };
+use std::time::{SystemTime, UNIX_EPOCH}; // DEBUGGING
+
 pub const MAP_SIZE: usize = 0xffffff;
 pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
 
@@ -56,7 +58,7 @@ pub fn fuzz() {
     };
     // Hardcoded parameters
     let cores = Cores::from_cmdline("1").unwrap();
-    let timeout = Duration::from_secs(2);
+    let timeout = Duration::from_secs(30); // XXX let's get this way lower!
     let broker_port = 1337;
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
@@ -69,8 +71,10 @@ pub fn fuzz() {
         let env: Vec<(String, String)> = env::vars().collect();
         let emu = Emulator::new(&args, &env);
 
-        // Load the specified snapshot from the qcow
+        println!("{:?} start of run client", SystemTime::now());
+        // Load the specified snapshot from the qcow before the first input
         emu.load_snapshot(&start_snap_name, true);
+        println!("{:?} loaded snapshot", SystemTime::now());
 
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
@@ -81,6 +85,7 @@ pub fn fuzz() {
 
         let mut cov_shmem = shmem_provider.new_shmem(MAP_SIZE).unwrap();
         cov_shmem.write_to_env(COV_SHMID_ENV).unwrap();
+
         // The harness closure
         let mut harness = |input: &BytesInput| {
             let mut buf = input.bytes().as_slice();
@@ -105,7 +110,7 @@ pub fn fuzz() {
                     let id: i32 = tmp_map.id().into();
                     let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
                     provider.release_shmem(&mut tmp_map);
-                    //println!("shmctl on id {} returned {}", id, shm_ret);
+                    println!("shmctl on id {} returned {}", id, shm_ret);
                 }
             }
 
@@ -126,20 +131,17 @@ pub fn fuzz() {
                 INPUT_SIZE = len;
                 //shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
-                //let input_str = String::from_utf8_lossy(&INPUT);
-                //println!("Before emu.run with input {input_str}");
+                let input_str = String::from_utf8_lossy(&INPUT);
+                println!("WSF_Fuzzer run emulator with input {input_str}");
                 emu.run();
-
-                //println!("Before restore_fast_snap");
-                //emu.restore_fast_snapshot(snap);
-                //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
             //provider.release_shmem(&mut shmem);
 
-
             // Revert, either to our qcow or our fast snapshot
+            println!("{:?} Emulation stopped. Done with input", SystemTime::now());
             emu.load_snapshot(&start_snap_name, true);
+            println!("{:?} Reverted snapshot", SystemTime::now());
             //emu.restore_fast_snapshot(snap);
 
             ret
@@ -228,9 +230,11 @@ pub fn fuzz() {
             state.add_metadata(Tokens::from_file(tokens_file.clone()).unwrap());
         }
         
+        println!("{:?} Start fuzz loop", SystemTime::now());
         fuzzer
             .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
+        println!("{:?} End fuzz loop", SystemTime::now());
 
         Ok(())
     };
