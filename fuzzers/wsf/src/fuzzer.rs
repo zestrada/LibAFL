@@ -38,7 +38,7 @@ use libafl_qemu::{
 pub const MAP_SIZE: usize = 0xffffff;
 pub static COV_SHMID_ENV: &str = "WSF_coverage_shmid";
 
-pub const MAX_INPUT_SIZE: usize = 128;
+pub const MAX_INPUT_SIZE: usize = 1024;
 
 pub static mut MAP_SIZE_MUT: usize = MAP_SIZE;
 
@@ -56,7 +56,7 @@ pub fn fuzz() {
     };
     // Hardcoded parameters
     let cores = Cores::from_cmdline("1").unwrap();
-    let timeout = Duration::from_secs(10);
+    let timeout = Duration::from_secs(2);
     let broker_port = 1337;
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
@@ -87,7 +87,7 @@ pub fn fuzz() {
             let mut len = buf.len();
 
             let mut provider = StdShMemProvider::new().unwrap();
-            let mut shmem = provider.new_shmem(len).unwrap();
+            //let mut shmem = provider.new_shmem(len).unwrap();
 
             //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
 
@@ -126,7 +126,8 @@ pub fn fuzz() {
                 INPUT_SIZE = len;
                 //shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
-                //println!("Before emu.run");
+                //let input_str = String::from_utf8_lossy(&INPUT);
+                //println!("Before emu.run with input {input_str}");
                 emu.run();
 
                 //println!("Before restore_fast_snap");
@@ -134,7 +135,7 @@ pub fn fuzz() {
                 //println!("After restore_fast_snap");
             }
             let ret = ExitKind::Ok;
-            provider.release_shmem(&mut shmem);
+            //provider.release_shmem(&mut shmem);
 
 
             // Revert, either to our qcow or our fast snapshot
