@@ -49,8 +49,12 @@ pub static mut MAP_SIZE_MUT: usize = MAP_SIZE;
 pub static mut __afl_input_ptr_local: [u8; MAX_INPUT_SIZE] = [0; MAX_INPUT_SIZE];
 #[no_mangle]
 pub static mut __afl_input_size: usize = 0;
+#[no_mangle]
+pub static mut __afl_input_status: u32 = 0;
+
 pub use __afl_input_ptr_local as INPUT;
 pub use __afl_input_size as INPUT_SIZE;
+pub use __afl_input_status as INPUT_STATUS;
 
 pub fn fuzz() {
     if let Ok(s) = env::var("FUZZ_SIZE") {
@@ -58,7 +62,7 @@ pub fn fuzz() {
     };
     // Hardcoded parameters
     let cores = Cores::from_cmdline("1").unwrap();
-    let timeout = Duration::from_secs(30); // XXX let's get this way lower!
+    let timeout = Duration::from_secs(5); // XXX let's get this way lower!
     let broker_port = 1337;
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
@@ -71,10 +75,10 @@ pub fn fuzz() {
         let env: Vec<(String, String)> = env::vars().collect();
         let emu = Emulator::new(&args, &env);
 
-        println!("{:?} start of run client", SystemTime::now());
+        //println!("{:?} start of run client", SystemTime::now());
         // Load the specified snapshot from the qcow before the first input
         emu.load_snapshot(&start_snap_name, true);
-        println!("{:?} loaded snapshot", SystemTime::now());
+        //println!("{:?} loaded snapshot", SystemTime::now());
 
         // Take a fast snapshot - Nah we'll use slow snaps
         //let snap = emu.create_fast_snapshot(true);
@@ -115,7 +119,10 @@ pub fn fuzz() {
             }
 
             //Now write some data, gotta convert to u8 slice
+            let mut ret  = ExitKind::Ok; // Default
+
             unsafe {
+                INPUT_STATUS = 0; // Unknown
                 if len > MAX_INPUT_SIZE {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     len = MAX_INPUT_SIZE;
@@ -131,18 +138,46 @@ pub fn fuzz() {
                 INPUT_SIZE = len;
                 //shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
-                let input_str = String::from_utf8_lossy(&INPUT);
-                println!("WSF_Fuzzer run emulator with input {input_str}");
+                //let input_str = String::from_utf8_lossy(&INPUT);
+                //println!("WSF_Fuzzer run emulator with input {input_str}");
                 emu.run();
-            }
-            let ret = ExitKind::Ok;
-            //provider.release_shmem(&mut shmem);
 
-            // Revert, either to our qcow or our fast snapshot
-            println!("{:?} Emulation stopped. Done with input", SystemTime::now());
-            emu.load_snapshot(&start_snap_name, true);
-            println!("{:?} Reverted snapshot", SystemTime::now());
-            //emu.restore_fast_snapshot(snap);
+                // We know when it's a timeout (VPN->coverage or SSN) so bridge that info back to here!
+                ret = match INPUT_STATUS {
+                    0 => { /* Unknown */
+                        println!("Input status wasn't set during fuzz run");
+                        ExitKind::Ok
+                        },
+                    1 => ExitKind::Ok,
+                    2 => ExitKind::Timeout,
+                    3 => ExitKind::Crash,
+                    4 => {
+                        // guest kernel panicked, that's probably not from our input so let's say
+                        // it exited OK (hack), but do a full snapshot restore (then we'll do a
+                        // fast restore on top of that which should effectively be a NOP)
+                        println!("Guest kernel panicked - revert full snapshot");
+                        //emu.load_snapshot(&start_snap_name, true);
+                        // TODO: should we re-take `snap` here?
+                        ExitKind::Ok
+                    },
+                    _ => {
+                        println!("Unexpected input status after fuzz run");
+                        ExitKind::Timeout},
+
+                };
+                //provider.release_shmem(&mut shmem);
+
+                // Revert, either to our qcow or our fast snapshot
+                //println!("{:?} Emulation stopped. Done with input", SystemTime::now());
+                emu.load_snapshot(&start_snap_name, true);
+                //println!("{:?} Reverted snapshot", SystemTime::now());
+
+
+                // Don't do the fast revert if we just did a slow one!
+                //if (INPUT_STATUS != 4)  {
+                //    emu.restore_fast_snapshot(snap);
+                //}
+            }
 
             ret
         };
@@ -230,11 +265,11 @@ pub fn fuzz() {
             state.add_metadata(Tokens::from_file(tokens_file.clone()).unwrap());
         }
         
-        println!("{:?} Start fuzz loop", SystemTime::now());
+        //println!("{:?} Start fuzz loop", SystemTime::now());
         fuzzer
             .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
             .unwrap();
-        println!("{:?} End fuzz loop", SystemTime::now());
+        //println!("{:?} End fuzz loop", SystemTime::now());
 
         Ok(())
     };
