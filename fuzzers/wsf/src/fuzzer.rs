@@ -1,6 +1,6 @@
 use core::{ptr::addr_of_mut,time::Duration,ptr};
 use std::{env, path::PathBuf, process};
-use libc::{shmctl};
+//use libc::{shmctl};
 
 use libafl::{
     bolts::{
@@ -95,29 +95,6 @@ pub fn fuzz() {
             let mut buf = input.bytes().as_slice();
             let mut len = buf.len();
 
-            let mut provider = StdShMemProvider::new().unwrap();
-            //let mut shmem = provider.new_shmem(len).unwrap();
-
-            //println!("{} in env: {}",env_var,env::var(env_var).unwrap());
-
-            //Below should't release shm until nothing is attached.
-            //*BUT* shmget will not return an id if the segment has been marked
-            //for deletion. So don't do that.
-            //Certainly not rusty to call shmctl directly, but we had a mem leak
-            //Should really happen on Drop, so we're likely holding on to refs.
-            //https://docs.rs/libafl/latest/src/libafl/bolts/shmem.rs.html#901-910
-            unsafe {
-                //Even though we just mapped the input, leaving this as dealing
-                //with the env var so the code could be easily moved
-                for env_var in [COV_SHMID_ENV] {
-                    let mut tmp_map = provider.existing_from_env(env_var).unwrap();
-                    let id: i32 = tmp_map.id().into();
-                    let shm_ret = libc::shmctl(id, libc::IPC_RMID, ptr::null_mut());
-                    provider.release_shmem(&mut tmp_map);
-                    println!("shmctl on id {} returned {}", id, shm_ret);
-                }
-            }
-
             //Now write some data, gotta convert to u8 slice
             let mut ret  = ExitKind::Ok; // Default
 
@@ -127,16 +104,8 @@ pub fn fuzz() {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     len = MAX_INPUT_SIZE;
                 }
-                //let shm_input = shmem.as_mut_slice();
-
-                /*
-                for (dst, src) in shm_input.iter_mut().zip(&buf) {
-                        *dst = *src
-                }
-                */
                 INPUT[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
                 INPUT_SIZE = len;
-                //shm_input[..len].copy_from_slice(&buf[..len]);//src=buf, dst=input
 
                 //let input_str = String::from_utf8_lossy(&INPUT);
                 //println!("WSF_Fuzzer run emulator with input {input_str}");
@@ -165,7 +134,6 @@ pub fn fuzz() {
                         ExitKind::Timeout},
 
                 };
-                //provider.release_shmem(&mut shmem);
 
                 // Revert, either to our qcow or our fast snapshot
                 //println!("{:?} Emulation stopped. Done with input", SystemTime::now());
