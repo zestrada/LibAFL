@@ -80,9 +80,8 @@ pub fn fuzz() {
         emu.load_snapshot(&start_snap_name, true);
         //println!("{:?} loaded snapshot", SystemTime::now());
 
-        // Take a fast snapshot - Nah we'll use slow snaps
+        // Take a fast snapshot. Or should we use slow snaps?
         //let snap = emu.create_fast_snapshot(true);
-
 
         // The shared memory allocator
         let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
@@ -96,10 +95,10 @@ pub fn fuzz() {
             let mut len = buf.len();
 
             //Now write some data, gotta convert to u8 slice
-            let mut ret  = ExitKind::Ok; // Default
+            let ret = unsafe {
+                INPUT_STATUS = 0; // 0=unknown, will be modified during emu.run
 
-            unsafe {
-                INPUT_STATUS = 0; // Unknown
+                // copy input from buf, truncate at size limit
                 if len > MAX_INPUT_SIZE {
                     buf = &buf[0..MAX_INPUT_SIZE];
                     len = MAX_INPUT_SIZE;
@@ -109,44 +108,51 @@ pub fn fuzz() {
 
                 //let input_str = String::from_utf8_lossy(&INPUT);
                 //println!("WSF_Fuzzer run emulator with input {input_str}");
+
+                // Run emulation until our plugins stop it
                 emu.run();
 
-                // We know when it's a timeout (VPN->coverage or SSN) so bridge that info back to here!
-                ret = match INPUT_STATUS {
+                // Plugins should have provided an INPUT_STATUS which affects our result
+                match INPUT_STATUS {
                     0 => { /* Unknown */
                         println!("Input status wasn't set during fuzz run");
+                        //emu.restore_fast_snapshot(snap);
                         ExitKind::Ok
+                    },
+                    1 => {
+                        //emu.restore_fast_snapshot(snap);
+                        ExitKind::Ok
+                    },
+                    2 => {
+                        //emu.restore_fast_snapshot(snap);
+                        ExitKind::Timeout
+                    },
+                    3 => {
+                        // After a crash do a slow revert just to be safe?
+                        //emu.load_snapshot(&start_snap_name, true);
+                        ExitKind::Crash
                         },
-                    1 => ExitKind::Ok,
-                    2 => ExitKind::Timeout,
-                    3 => ExitKind::Crash,
                     4 => {
                         // guest kernel panicked, that's probably not from our input so let's say
                         // it exited OK (hack), but do a full snapshot restore (then we'll do a
                         // fast restore on top of that which should effectively be a NOP)
                         println!("Guest kernel panicked - revert full snapshot");
                         //emu.load_snapshot(&start_snap_name, true);
-                        // TODO: should we re-take `snap` here?
+                        // Is it necessary to re-take `snap` here?
+                        //snap = emu.create_fast_snapshot(true);
                         ExitKind::Ok
                     },
                     _ => {
+                        // Slow revert?
+                        //emu.load_snapshot(&start_snap_name, true);
                         println!("Unexpected input status after fuzz run");
-                        ExitKind::Timeout},
+                        ExitKind::Timeout
+                    },
+                }
+            };
 
-                };
-
-                // Revert, either to our qcow or our fast snapshot
-                //println!("{:?} Emulation stopped. Done with input", SystemTime::now());
-                emu.load_snapshot(&start_snap_name, true);
-                //println!("{:?} Reverted snapshot", SystemTime::now());
-
-
-                // Don't do the fast revert if we just did a slow one!
-                //if (INPUT_STATUS != 4)  {
-                //    emu.restore_fast_snapshot(snap);
-                //}
-            }
-
+            // Alternatively, always revert to slow snap
+            emu.load_snapshot(&start_snap_name, true);
             ret
         };
 
