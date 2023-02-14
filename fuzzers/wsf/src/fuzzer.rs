@@ -62,26 +62,34 @@ pub fn fuzz() {
     };
     // Hardcoded parameters
     let cores = Cores::from_cmdline("1").unwrap();
-    let timeout = Duration::from_secs(5); // XXX let's get this way lower!
+    let timeout = Duration::from_secs(5);
     let broker_port = 1337;
     let corpus_dirs = [PathBuf::from("./corpus")];
     let objective_dir = PathBuf::from("./crashes");
     let tokens_file =  PathBuf::from("./tokens/test.dict");
     let start_snap_name = env::var("SNAP_NAME").expect("SNAP_NAME not set");
 
-    let mut run_client = |state: Option<_>, mut mgr, _core_id| {
+    let mut run_client = |state: Option<_>, mut mgr, core_id| {
         // Initialize QEMU
-        let args: Vec<String> = env::args().collect();
+        let qcow_suffix = format!(".qcow2.{}", core_id);
+        let args: Vec<String> = env::args().map(|x| x.replace(".qcow2", &qcow_suffix)).collect();
         let env: Vec<(String, String)> = env::vars().collect();
+
+        // Note we replaced ".qcow2" with ".qcow2.[core_id]" - someone else needs to provide all
+        // those (duplicate) files
+        //println!("Run qemu with args: {:?}", args);
+
+
         let emu = Emulator::new(&args, &env);
 
-        //println!("{:?} start of run client", SystemTime::now());
+        println!("{:?} start of run client on core {:?}", SystemTime::now(), core_id);
         // Load the specified snapshot from the qcow before the first input
         emu.load_snapshot(&start_snap_name, true);
         //println!("{:?} loaded snapshot", SystemTime::now());
 
         // Take a fast snapshot. Or should we use slow snaps?
-        //let snap = emu.create_fast_snapshot(true);
+        let snap = emu.create_fast_snapshot(true);
+        //emu.restore_fast_snapshot(snap); // TESTING
 
         // The shared memory allocator
         let mut shmem_provider = StdShMemProvider::new().expect("Failed to init shared memory");
@@ -112,6 +120,8 @@ pub fn fuzz() {
                 // Run emulation until our plugins stop it
                 emu.run();
 
+                //println!("Finished fuzzing (Result={INPUT_STATUS})");
+
                 // Plugins should have provided an INPUT_STATUS which affects our result
                 match INPUT_STATUS {
                     0 => { /* Unknown */
@@ -136,7 +146,8 @@ pub fn fuzz() {
                         // guest kernel panicked, that's probably not from our input so let's say
                         // it exited OK (hack), but do a full snapshot restore (then we'll do a
                         // fast restore on top of that which should effectively be a NOP)
-                        println!("Guest kernel panicked - revert full snapshot");
+                        //println!("Guest kernel panicked - revert full snapshot");
+                        panic!("Guest kernel panicked - revert full snapshot");
                         //emu.load_snapshot(&start_snap_name, true);
                         // Is it necessary to re-take `snap` here?
                         //snap = emu.create_fast_snapshot(true);
@@ -152,7 +163,8 @@ pub fn fuzz() {
             };
 
             // Alternatively, always revert to slow snap
-            emu.load_snapshot(&start_snap_name, true);
+            //emu.load_snapshot(&start_snap_name, true);
+            emu.restore_fast_snapshot(snap);
             ret
         };
 
