@@ -997,13 +997,17 @@ where
                         // Out of Memory, see https://tldp.org/LDP/abs/html/exitcodes.html
                         // and https://github.com/AFLplusplus/LibAFL/issues/32 for discussion.
                         panic!("Fuzzer-respawner: The fuzzed target crashed with an out of memory error! Fix your harness, or switch to another executor (for example, a forkserver).");
+                    } else if child_status == 0 {
+                        // This used to hit the following panic! but if the child exited cleanly,
+                        // let's assume that's a part of a shutdown we requested, not a crash
+                        // down we can allow it.
+                        println!("Fuzzer exited cleanly - assuming this is a user-requested shutdown");
+                        return Err(Error::shutting_down());
+
                     }
 
                     // Storing state in the last round did not work
-                    println!("Fuzzer-respawner: Storing state in crashed fuzzer instance did not work, no point to spawn the next client! This can happen if the child calls `exit()`, in that case make sure it uses `abort()`, if it got killed unrecoverable (OOM), or if there is a bug in the fuzzer itself. (Child exited with: {child_status})");
-                    // This is a fatal error (was a panic! before), but if the fuzzer is shutting
-                    // down we can allow it.
-                    return Err(Error::shutting_down());
+                    panic!("Fuzzer-respawner: Storing state in crashed fuzzer instance did not work, no point to spawn the next client! This can happen if the child calls `exit()`, in that case make sure it uses `abort()`, if it got killed unrecoverable (OOM), or if there is a bug in the fuzzer itself. (Child exited with: {child_status})");
                 }
                 ctr = ctr.wrapping_add(1);
             }
