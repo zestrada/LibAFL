@@ -234,12 +234,15 @@ pub fn fuzz() {
         }
         
         //println!("{:?} Start fuzz loop", SystemTime::now());
-        fuzzer
-            .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr)
-            .unwrap();
-        //println!("{:?} End fuzz loop", SystemTime::now());
-
-        Ok(())
+        match fuzzer
+            .fuzz_loop(&mut stages, &mut executor, &mut state, &mut mgr) {
+                Ok(_) => Ok(()),
+                Err(Error::ShuttingDown) =>  {
+                    println!("Fuzz loop stopped by user.Good bye.");
+                    Err(Error::ShuttingDown)
+                },
+                Err(err) => panic!("Unexpected fuzz loop exit: {:?}", err),
+            }
     };
 
 
